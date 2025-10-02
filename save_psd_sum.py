@@ -8,7 +8,7 @@ from scipy.signal.windows import hann
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='PSD feature extraction for EEG data')
 parser.add_argument('--data_path', default='../Processed_data', type=str, help='Path to the EEG data')
-parser.add_argument('--output_path', default='../PSD_features', type=str, help='Path to save the PSD features')
+parser.add_argument('--output_path', default='../Features/PSD_features_sum', type=str, help='Path to save the PSD features')
 args = parser.parse_args()
 
 # calculate the power spectral density using improved method
@@ -55,7 +55,7 @@ def extract_psd_feature(data, fs=250, stft_n=256, freq_bands=None):
             start_bin = max(1, start_bin)  # Avoid DC component
             end_bin = min(int(stft_n / 2), end_bin)
             
-            band_power = np.mean(relative_energy_graph[:, start_bin-1:end_bin] ** 2, axis=1)
+            band_power = np.sum(relative_energy_graph[:, start_bin-1:end_bin] ** 2, axis=1)
             psd_feature[window_index, band_index, :] = band_power
     
     # Reshape to match expected output format (channels, windows, bands)

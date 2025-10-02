@@ -210,3 +210,6 @@ elif train_or_test == 'test':
     if subjects_type == 'intra':
         subjects_score = [np.sum(subjects_results_[i, :] == label_val_[i, :]) / subjects_results_.shape[1] for i in range(0, n_subs)]
         subjects_score = np.array(subjects_score).reshape(n_subs,-1)
+
+    pd.DataFrame(subjects_score).to_csv(os.path.join('subject_%s_vids_%s_valid_%s.csv' %(subjects_type,str(n_vids),valid_method)))
+    print('acc mean: %.4f, std: %.4f' % (np.mean(subjects_score), np.std(subjects_score)))

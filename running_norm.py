@@ -50,8 +50,8 @@ fs = 250
 freqs_bn = 5
 feature = args.feature
 
-# Feature dimensions: Hjorth(15) + DE(5) + PSD(5) = 25 features per channel
-hjorth_features = freqs_bn * 3  # 15 features (activity, mobility, complexity for 5 freq bands)
+# Feature dimensions: Hjorth(10) + DE(5) + PSD(5) = 20 features per channel
+hjorth_features = freqs_bn * 2  # 10 features (activity, mobility for 5 freq bands)
 de_features = freqs_bn         # 5 features
 psd_features = freqs_bn        # 5 features
 
@@ -62,35 +62,125 @@ elif feature == 'DE_PSD':
 elif feature == 'DE_PSD_H':
     total_features_per_channel = de_features + psd_features + hjorth_features
 
-def running_normalization(data, decay_rate):
-    data_mean = np.mean(np.mean(data[train_sub, :, :], axis=1), axis=0)
-    data_var = np.mean(np.var(data[train_sub, :, :], axis=1), axis=0)
+def apply_multiscale_running_norm(data, train_sub, decay_rate=0.990):
+    """
+    Apply running normalization separately for each feature type
+    
+    Args:
+        data: (n_subs, n_timepoints, n_total_features)
+        train_sub: indices of training subjects
+        decay_rate: exponential decay rate
+    
+    Returns:
+        normalized data with same shape as input
+    """
+    n_subs, n_timepoints, n_total_features = data.shape
+    
+    # Calculate features per channel
+    n_features_per_channel = n_total_features // chn
+    
+    # Feature type boundaries (per channel)
+    hjorth_end = hjorth_features
+    de_end = hjorth_end + de_features
+    psd_end = de_end + psd_features
+    
+    print(f"Feature boundaries per channel: Hjorth(0-{hjorth_end}), DE({hjorth_end}-{de_end}), PSD({de_end}-{psd_end})")
     
     data_norm = np.zeros_like(data)
-    for sub in range(data.shape[0]):
-        running_sum = np.zeros(data.shape[-1])
-        running_square = np.zeros(data.shape[-1])
-        decay_factor = 1.
-        # start_time = time.time()
-        for counter in range(n_counters):
-            data_one = data[sub, counter*bn_val: (counter+1)*bn_val, :]
-            running_sum = running_sum + data_one
-            running_mean = running_sum / (counter+1)
-            # running_mean = counter / (counter+1) * running_mean + 1/(counter+1) * data_one
-            running_square = running_square + data_one**2
-            running_var = (running_square - 2 * running_mean * running_sum) / (counter+1) + running_mean**2
+    
+    # Process each channel separately
+    for ch in range(chn):
+        print(f"Processing channel {ch+1}/{chn}")
+        
+        # Extract channel data
+        ch_start = ch * n_features_per_channel
+        ch_end = (ch + 1) * n_features_per_channel
+        ch_data = data[:, :, ch_start:ch_end]
+        
+        # Split into feature types
+        hjorth_data = ch_data[:, :, :hjorth_features]
+        de_data = ch_data[:, :, hjorth_features:hjorth_end + de_features] 
+        psd_data = ch_data[:, :, hjorth_end + de_features:]
+        
+        # Calculate baseline statistics for each feature type (training subjects only)
+        hjorth_mean = np.mean(np.mean(hjorth_data[train_sub, :, :], axis=1), axis=0)
+        hjorth_var = np.mean(np.var(hjorth_data[train_sub, :, :], axis=1), axis=0)
+        
+        de_mean = np.mean(np.mean(de_data[train_sub, :, :], axis=1), axis=0)
+        de_var = np.mean(np.var(de_data[train_sub, :, :], axis=1), axis=0)
+        
+        psd_mean = np.mean(np.mean(psd_data[train_sub, :, :], axis=1), axis=0)
+        psd_var = np.mean(np.var(psd_data[train_sub, :, :], axis=1), axis=0)
+        
+        print(f"Channel {ch+1} - Hjorth range: [{np.min(hjorth_data):.2e}, {np.max(hjorth_data):.2e}]")
+        print(f"Channel {ch+1} - DE range: [{np.min(de_data):.2e}, {np.max(de_data):.2e}]")
+        print(f"Channel {ch+1} - PSD range: [{np.min(psd_data):.2e}, {np.max(psd_data):.2e}]")
+        
+        # Apply running normalization to each subject
+        for sub in range(n_subs):
+            # Initialize running statistics for each feature type
+            hjorth_running_sum = np.zeros(hjorth_features)
+            hjorth_running_square = np.zeros(hjorth_features)
+            
+            de_running_sum = np.zeros(de_features)
+            de_running_square = np.zeros(de_features)
+            
+            psd_running_sum = np.zeros(psd_features)
+            psd_running_square = np.zeros(psd_features)
+            
+            decay_factor = 1.0
+            
+            for counter in range(n_counters):
+                # Extract current time step data for each feature type
+                hjorth_one = hjorth_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                de_one = de_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                psd_one = psd_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                
+                # Squeeze the time dimension to match running stats arrays
+                hjorth_one_squeezed = np.squeeze(hjorth_one, axis=0)
+                de_one_squeezed = np.squeeze(de_one, axis=0)
+                psd_one_squeezed = np.squeeze(psd_one, axis=0)
 
-            # print(decay_factor)
-            curr_mean = decay_factor*data_mean + (1-decay_factor)*running_mean
-            curr_var = decay_factor*data_var + (1-decay_factor)*running_var
-            decay_factor = decay_factor*decay_rate
-
-            # print(running_var[:3])
-            # if counter >= 2:
-            data_one = (data_one - curr_mean) / np.sqrt(curr_var + 1e-5)
-            data_norm[sub, counter*bn_val: (counter+1)*bn_val, :] = data_one
-        # end_time = time.time()
-        # print('time consumed: %.3f, counter: %d' % (end_time-start_time, counter+1))
+                # Update running statistics for Hjorth features
+                hjorth_running_sum += hjorth_one_squeezed
+                hjorth_running_mean = hjorth_running_sum / (counter + 1)
+                hjorth_running_square += hjorth_one_squeezed**2
+                hjorth_running_var = (hjorth_running_square - 2 * hjorth_running_mean * hjorth_running_sum) / (counter + 1) + hjorth_running_mean**2
+                
+                # Update running statistics for DE features
+                de_running_sum += de_one_squeezed
+                de_running_mean = de_running_sum / (counter + 1)
+                de_running_square += de_one_squeezed**2
+                de_running_var = (de_running_square - 2 * de_running_mean * de_running_sum) / (counter + 1) + de_running_mean**2
+                
+                # Update running statistics for PSD features
+                psd_running_sum += psd_one_squeezed
+                psd_running_mean = psd_running_sum / (counter + 1)
+                psd_running_square += psd_one_squeezed**2
+                psd_running_var = (psd_running_square - 2 * psd_running_mean * psd_running_sum) / (counter + 1) + psd_running_mean**2
+                
+                # Calculate current normalization parameters for each feature type
+                hjorth_curr_mean = decay_factor*hjorth_mean + (1-decay_factor)*hjorth_running_mean
+                hjorth_curr_var = decay_factor*hjorth_var + (1-decay_factor)*hjorth_running_var
+                
+                de_curr_mean = decay_factor*de_mean + (1-decay_factor)*de_running_mean
+                de_curr_var = decay_factor*de_var + (1-decay_factor)*de_running_var
+                
+                psd_curr_mean = decay_factor*psd_mean + (1-decay_factor)*psd_running_mean
+                psd_curr_var = decay_factor*psd_var + (1-decay_factor)*psd_running_var
+                
+                # Apply feature-specific normalization
+                hjorth_norm = (hjorth_one - hjorth_curr_mean) / np.sqrt(hjorth_curr_var + 1e-10)
+                de_norm = (de_one - de_curr_mean) / np.sqrt(de_curr_var + 1e-8)
+                psd_norm = (psd_one - psd_curr_mean) / np.sqrt(psd_curr_var + 1e-8)
+                
+                # Combine normalized features back
+                combined_norm = np.concatenate([hjorth_norm, de_norm, psd_norm], axis=-1)
+                data_norm[sub, counter*bn_val:(counter+1)*bn_val, ch_start:ch_end] = combined_norm
+                
+                # Update decay factor
+                decay_factor *= decay_rate
+    
     return data_norm
 
 # Main processing loop
@@ -133,34 +223,33 @@ for decay_rate in [0.990]:
         
         # Handle NaN values
         data[np.isnan(data)] = -30
-        # data[data<=-30] = -30
+
+        # Create save directory if it doesn't exist
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # Apply multi-scale running normalization
+        print("Applying multi-scale running normalization...")
+        data_norm = apply_multiscale_running_norm(data, train_sub, decay_rate)
         
-        # Calculate running normalization
-        data_norm = running_normalization(data, decay_rate)
+        # Reorder back to original video order
+        data_norm_back = reorder_vids_back(data_norm, vid_play_order_new, session_length=sec)
+        
+        # Save results
+        de = {'de': data_norm_back}
+        print(f"Final normalized data shape: {data_norm_back.shape}")
+        
+        # Create save directory
+        if isCar:
+            save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo_car' % (decay_rate, n_vids))
+        else:
+            save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo' % (decay_rate, n_vids))
+        
+        if not os.path.exists(save_name):
+            os.makedirs(save_name)
+        
+        save_file = os.path.join(save_name, 'de_fold%d.mat' % fold)
+        print(f"Saving to: {save_file}")
+        sio.savemat(save_file, de)
 
-        # Reorder videos back to original order
-        data_norm = reorder_vids_back(data_norm, vid_play_order_new)
-        de = {'de': data_norm}
-        print(data_norm.shape)
-        if (use_features == 'de') or (use_features == 'CoCA'):
-            if n_vids == 28:
-                if isCar:
-                    save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo_car' % (decay_rate, n_vids))
-                else:
-                    save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo' % (decay_rate, n_vids))
-                if not os.path.exists(save_name):
-                    os.makedirs(save_name)
-                save_file = os.path.join(save_name, 'de_fold%d.mat' % fold)
-            elif n_vids == 24:
-                if isCar:
-                    save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo_car' % (decay_rate, n_vids))
-                else:
-                    save_name = os.path.join(save_dir, 'normTrain_rnPreWeighted%.3f_newPre_%dvideo' % (decay_rate, n_vids))
-                if not os.path.exists(save_name):
-                    os.makedirs(save_name)
-                save_file = os.path.join(save_name, 'de_fold%d.mat' % fold)
-            print(save_file)
-            sio.savemat(save_file, de)
-
-            
-
+print("Multi-scale running normalization completed!")

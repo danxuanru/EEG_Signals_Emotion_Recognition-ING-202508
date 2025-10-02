@@ -9,7 +9,7 @@ import h5py
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Hjorth feature extraction for EEG data')
 parser.add_argument('--data_path', default='../Processed_data', type=str, help='Path to the EEG data')
-parser.add_argument('--output_path', default='../Hjorth_features', type=str, help='Path to save the Hjorth features')
+parser.add_argument('--output_path', default='../Features/Hjorth_features_re', type=str, help='Path to save the Hjorth features')
 args = parser.parse_args()
 
 # Calculate the Hjorth parameters
@@ -22,7 +22,7 @@ def extract_hjorth(data):
     mobility = np.sqrt((np.var(diff1, axis=-1) + epsilon) / activity)
     diff2 = np.diff(diff1, axis=-1)
     complexity = np.sqrt((np.var(diff2, axis=-1) + epsilon) / (np.var(diff1, axis=-1) + epsilon)) / mobility
-    return np.stack([activity, mobility, complexity], axis=-1)
+    return np.stack([mobility, complexity], axis=-1)
 
 # Create output directory if it doesn't exist
 output_path = args.output_path
@@ -52,7 +52,7 @@ for idx, path in enumerate(data_paths):
     
     # Initialize Hjorth features array
     # Shape: (videos, channels, seconds, frequency_bands, hjorth_parameters)
-    hjorth_features = np.zeros((n_vids, chn, sec, len(freqs), 3))
+    hjorth_features = np.zeros((n_vids, chn, sec, len(freqs), 2))
     
     # Extract Hjorth features for each frequency band
     for i, freq_band in enumerate(freqs):

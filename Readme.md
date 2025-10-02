@@ -21,14 +21,16 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 
 ### Usage
 
-1.  **DE feature calculation**
-    First, run `save_de.py` to extract the DE features from the raw data.
+1.  **Feature Calculation**
+    First, run the following three scripts to extract all DE, PSD, and Hjorth features from the raw data.
     ```bash
     python save_de.py
+    python save_psd_sum.py
+    python save_hjorth_re.py
     ```
 
 2.  **Run the full pipeline**
-    Next, use `run_all.py` to execute the entire pipeline, from feature merging to classification and result plotting. This script integrates all subsequent steps.
+    Next, use `run_all.py` to execute the entire pipeline. This script merges the selected features, performs normalization, and handles classification and result plotting.
 
     **Parameters:**
     *   `--n-vids`: Number of videos. Use `24` for binary classification (positive/negative) or `28` for nine-category classification.
@@ -47,7 +49,8 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 2.  Rewrote `save_de.py` to save feature results into separate directories. Features are now merged using `pkl_to_mat.py`, allowing for adjustable time window analysis.
 3.  Parameterized `run_all.py` by adding a `session-length` parameter to specify the duration of features to use.
 4.  Added `plot_result.py` for simple result visualization.
-5.  Introduced `PSD` and `Hjorth` as new features, selectable via the `--feature` argument.
+5.  Introduced `PSD` and `Hjorth` as new features, selectable via the `--feature` argument, with dedicated extraction scripts (`save_psd_sum.py`, `save_hjorth_re.py`).
+6.  Implemented multi-scale normalization in `running_norm.py` to process each feature type (DE, PSD, Hjorth) independently.
 
 ---
 
@@ -68,22 +71,24 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 
 ### 使用方法
 
-1.  **計算微分熵（DE）特徵**
-    首先，執行 `save_de.py` 來從原始數據中提取DE特徵。
+1.  **特徵計算**
+    首先，執行以下三個腳本，從原始數據中提取所有的 DE、PSD 和 Hjorth 特徵。
     ```bash
     python save_de.py
+    python save_psd_sum.py
+    python save_hjorth_re.py
     ```
 
 2.  **執行完整流程**
-    接著，使用 `run_all.py` 執行從特徵合併、分類到結果繪製的完整流程。此腳本整合了後續所有步驟。
+    接著，使用 `run_all.py` 執行整個流程。此腳本會整合選擇的特徵、執行正規化、處理分類及繪製結果。
 
     **參數說明：**
-    *   `--n-vids`：影片數量。二元分類（正面/負面）請使用 `24`，九類分類請使用 `28`。
-    *   `--subject-type`：分析類型。跨受試者分析請使用 `cross`，受試者內部分析請使用 `intra`。
-    *   `--session-length`：指定從每個影片提供的30秒特徵數據中，從頭開始使用幾秒的數據進行分析。
+    *   `--n-vids`：影片數量。二元分類（正面／負面）使用 `24`，九分類使用 `28`。
+    *   `--subject-type`：分析類型。`cross` 為跨受試者分析，`intra` 為受試者內分析。
+    *   `--session-length`：指定使用每個影片所提供之 30 秒特徵數據的前幾秒。
     *   `--feature`：要使用的特徵組合。可選 `DE`（預設）、`DE_PSD`（DE + PSD）或 `DE_PSD_H`（DE + PSD + Hjorth）。
 
-    **範例（九分類、跨受試者、使用所有特徵及前1秒數據）：**
+    **範例（九分類、跨受試者、使用所有特徵的第一秒數據）：**
     ```bash
     python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H
     ```
@@ -94,4 +99,5 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 2.  改寫 `save_de.py`，將特徵提取結果以資料夾形式儲存，並使用 `pkl_to_mat.py` 合併特徵，方便依不同時間窗口進行分析。
 3.  參數化 `run_all.py`，加入 `session-length` 參數，可用於設定數據切割的時間窗口長度。
 4.  加入 `plot_result.py` 以實現簡易的結果可視化。
-5.  引入 `PSD` 和 `Hjorth` 兩種新特徵，可透過 `--feature` 參數進行選擇。
+5.  引入 `PSD` 和 `Hjorth` 兩種新特徵，可透過 `--feature` 參數進行選擇，並提供專門的提取腳本（`save_psd_sum.py`, `save_hjorth_re.py`）。
+6.  在 `running_norm.py` 中實現多尺度正規化，對每種特徵類型（DE, PSD, Hjorth）進行獨立處理。
