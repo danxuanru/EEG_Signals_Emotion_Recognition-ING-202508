@@ -6,7 +6,23 @@ import h5py
 # Default value, will be overridden by parameter
 sec = 30
 
-def load_srt_raw_newPre(data_dir, timeLen, timeStep, fs, channel_norm, time_norm, label_type):
+# load raw_data
+# channel norm & time norm
+def load_srt_raw_newPre(data_dir, timeLen, timeStep, fs, channel_norm, time_norm, label_type, session_length=None):
+    # data_dir: the path of the data
+    # timeLen: the length of the time window
+    # timeStep: the step of the time window
+    # fs: the sampling frequency
+    # channel_norm: whether to do the channel normalization
+    # time_norm: whether to do the time normalization
+    # label_type: the type of the label, cls2 or cls9
+    # session_length: length of each video session in seconds
+    # return data, label_repeat, n_samples, n_segs
+    
+    global sec
+    if session_length is not None:
+        sec = session_length
+
     n_channs = 30
     n_points = 7500
     data_len = fs * timeLen
@@ -36,11 +52,15 @@ def load_srt_raw_newPre(data_dir, timeLen, timeStep, fs, channel_norm, time_norm
 
     if channel_norm:
         for i in range(data.shape[0]):
-            data[i,:,:] = (data[i,:,:] - np.mean(data[i,:,:], axis=0)) / np.std(data[i,:,:], axis=0)
+            # Add small epsilon to prevent division by zero
+            epsilon = 1e-10
+            data[i,:,:] = (data[i,:,:] - np.mean(data[i,:,:], axis=0)) / (np.std(data[i,:,:], axis=0) + epsilon)
 
     if time_norm:
+        # Add epsilon to avoid division by zero
+        epsilon = 1e-10
         data = (data - np.tile(np.expand_dims(np.mean(data, axis=2), 2), (1, 1, data.shape[2]))) / np.tile(
-            np.expand_dims(np.std(data, axis=2), 2), (1, 1, data.shape[2])
+            np.expand_dims(np.std(data, axis=2) + epsilon, 2), (1, 1, data.shape[2])
         )
 
     n_samples = np.ones(n_videos)*n_segs
@@ -63,7 +83,11 @@ def load_srt_raw_newPre(data_dir, timeLen, timeStep, fs, channel_norm, time_norm
     return data, label_repeat, n_samples, n_segs
 
 
-def load_srt_de(data, channel_norm, isFilt, filtLen, label_type):
+def load_srt_de(data, channel_norm, isFilt, filtLen, label_type, session_length=None):
+    global sec
+    if session_length is not None:
+        sec = session_length
+        
     n_subs = 123
     if label_type =='cls2':
         n_vids = 24
@@ -85,7 +109,9 @@ def load_srt_de(data, channel_norm, isFilt, filtLen, label_type):
     # Normalization for each sub
     if channel_norm:
         for i in range(data.shape[0]):
-            data[i,:,:] = (data[i,:,:] - np.mean(data[i,:,:], axis=0)) / np.std(data[i,:,:], axis=0)
+            # Add small epsilon to prevent division by zero
+            epsilon = 1e-10
+            data[i,:,:] = (data[i,:,:] - np.mean(data[i,:,:], axis=0)) / (np.std(data[i,:,:], axis=0) + epsilon)
 
     if label_type == 'cls2':
         label = [0] * 12
@@ -105,7 +131,11 @@ def load_srt_de(data, channel_norm, isFilt, filtLen, label_type):
     return data, label_repeat, n_samples
 
 
-def load_srt_pretrainFeat(datadir, channel_norm, timeLen, timeStep, isFilt, filtLen, label_type):
+def load_srt_pretrainFeat(datadir, channel_norm, timeLen, timeStep, isFilt, filtLen, label_type, session_length=None):
+    global sec
+    if session_length is not None:
+        sec = session_length
+        
     if label_type == 'cls9':
         n_samples = np.ones(28).astype(np.int32) * sec
     elif label_type == 'cls2':

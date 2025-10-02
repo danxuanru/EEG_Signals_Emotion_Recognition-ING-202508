@@ -21,7 +21,7 @@ parser.add_argument('--dataset', default='both', type=str,
                     help='first_batch or second_batch')
 parser.add_argument('--session-length', default=30, type=int,
                     help='length of each video session in seconds')
-
+parser.add_argument('--feature', default='DE', choices=['DE', 'DE_PSD', 'DE_PSD_H'], help='Feature combination: DE, DE_PSD, or DE_PSD_H')
 args = parser.parse_args()
 
 random.seed(args.randSeed)
@@ -48,6 +48,50 @@ n_per = round(n_subs / n_folds)
 chn = 30
 fs = 250
 freqs_bn = 5
+feature = args.feature
+
+# Feature dimensions: Hjorth(15) + DE(5) + PSD(5) = 25 features per channel
+hjorth_features = freqs_bn * 3  # 15 features (activity, mobility, complexity for 5 freq bands)
+de_features = freqs_bn         # 5 features
+psd_features = freqs_bn        # 5 features
+
+if feature == 'DE':
+    total_features_per_channel = de_features
+elif feature == 'DE_PSD':
+    total_features_per_channel = de_features + psd_features
+elif feature == 'DE_PSD_H':
+    total_features_per_channel = de_features + psd_features + hjorth_features
+
+def running_normalization(data, decay_rate):
+    data_mean = np.mean(np.mean(data[train_sub, :, :], axis=1), axis=0)
+    data_var = np.mean(np.var(data[train_sub, :, :], axis=1), axis=0)
+    
+    data_norm = np.zeros_like(data)
+    for sub in range(data.shape[0]):
+        running_sum = np.zeros(data.shape[-1])
+        running_square = np.zeros(data.shape[-1])
+        decay_factor = 1.
+        # start_time = time.time()
+        for counter in range(n_counters):
+            data_one = data[sub, counter*bn_val: (counter+1)*bn_val, :]
+            running_sum = running_sum + data_one
+            running_mean = running_sum / (counter+1)
+            # running_mean = counter / (counter+1) * running_mean + 1/(counter+1) * data_one
+            running_square = running_square + data_one**2
+            running_var = (running_square - 2 * running_mean * running_sum) / (counter+1) + running_mean**2
+
+            # print(decay_factor)
+            curr_mean = decay_factor*data_mean + (1-decay_factor)*running_mean
+            curr_var = decay_factor*data_var + (1-decay_factor)*running_var
+            decay_factor = decay_factor*decay_rate
+
+            # print(running_var[:3])
+            # if counter >= 2:
+            data_one = (data_one - curr_mean) / np.sqrt(curr_var + 1e-5)
+            data_norm[sub, counter*bn_val: (counter+1)*bn_val, :] = data_one
+        # end_time = time.time()
+        # print('time consumed: %.3f, counter: %d' % (end_time-start_time, counter+1))
+    return data_norm
 
 # Main processing loop
 for decay_rate in [0.990]:
@@ -61,7 +105,7 @@ for decay_rate in [0.990]:
             print(f"Original data shape: {data.shape}")
             
             # Reshape: (subjects, channels, time_points, features) -> (subjects, time_points, all_features)
-            data = data.transpose([0,2,3,1]).reshape(n_subs, n_vids*sec, chn*freqs_bn)
+            data = data.transpose([0,2,3,1]).reshape(n_subs, n_vids*sec, chn*total_features_per_channel)
             print(f"Reshaped data shape: {data.shape}")
         else:
             # Handle other feature types if needed
@@ -92,34 +136,7 @@ for decay_rate in [0.990]:
         # data[data<=-30] = -30
         
         # Calculate running normalization
-        data_mean = np.mean(np.mean(data[train_sub, :, :], axis=1), axis=0)
-        data_var = np.mean(np.var(data[train_sub, :, :], axis=1), axis=0)
-        
-        data_norm = np.zeros_like(data)
-        for sub in range(data.shape[0]):
-            running_sum = np.zeros(data.shape[-1])
-            running_square = np.zeros(data.shape[-1])
-            decay_factor = 1.
-            start_time = time.time()
-            for counter in range(n_counters):
-                data_one = data[sub, counter*bn_val: (counter+1)*bn_val, :]
-                running_sum = running_sum + data_one
-                running_mean = running_sum / (counter+1)
-                # running_mean = counter / (counter+1) * running_mean + 1/(counter+1) * data_one
-                running_square = running_square + data_one**2
-                running_var = (running_square - 2 * running_mean * running_sum) / (counter+1) + running_mean**2
-
-                # print(decay_factor)
-                curr_mean = decay_factor*data_mean + (1-decay_factor)*running_mean
-                curr_var = decay_factor*data_var + (1-decay_factor)*running_var
-                decay_factor = decay_factor*decay_rate
-
-                # print(running_var[:3])
-                # if counter >= 2:
-                data_one = (data_one - curr_mean) / np.sqrt(curr_var + 1e-5)
-                data_norm[sub, counter*bn_val: (counter+1)*bn_val, :] = data_one
-            end_time = time.time()
-            # print('time consumed: %.3f, counter: %d' % (end_time-start_time, counter+1))
+        data_norm = running_normalization(data, decay_rate)
 
         # Reorder videos back to original order
         data_norm = reorder_vids_back(data_norm, vid_play_order_new)

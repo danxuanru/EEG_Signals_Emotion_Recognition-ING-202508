@@ -34,10 +34,11 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
     *   `--n-vids`: Number of videos. Use `24` for binary classification (positive/negative) or `28` for nine-category classification.
     *   `--subject-type`: Type of analysis. Use `cross` for cross-subject or `intra` for intra-subject analysis.
     *   `--session-length`: Specifies the number of seconds to use from the beginning of the 30-second feature data provided for each video.
+    *   `--feature`: The combination of features to use. Options are `DE` (default), `DE_PSD` (DE + PSD), or `DE_PSD_H` (DE + PSD + Hjorth).
 
-    **Example (Nine-category, cross-subject, using the first second of features):**
+    **Example (Nine-category, cross-subject, using all features for the first second):**
     ```bash
-    python run_all.py --n-vids 28 --subject-type cross --session-length 1
+    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H
     ```
 
 ### Modifications
@@ -46,6 +47,7 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 2.  Rewrote `save_de.py` to save feature results into separate directories. Features are now merged using `pkl_to_mat.py`, allowing for adjustable time window analysis.
 3.  Parameterized `run_all.py` by adding a `session-length` parameter to specify the duration of features to use.
 4.  Added `plot_result.py` for simple result visualization.
+5.  Introduced `PSD` and `Hjorth` as new features, selectable via the `--feature` argument.
 
 ---
 
@@ -79,10 +81,11 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
     *   `--n-vids`：影片數量。二元分類（正面/負面）請使用 `24`，九類分類請使用 `28`。
     *   `--subject-type`：分析類型。跨受試者分析請使用 `cross`，受試者內部分析請使用 `intra`。
     *   `--session-length`：指定從每個影片提供的30秒特徵數據中，從頭開始使用幾秒的數據進行分析。
+    *   `--feature`：要使用的特徵組合。可選 `DE`（預設）、`DE_PSD`（DE + PSD）或 `DE_PSD_H`（DE + PSD + Hjorth）。
 
-    **範例（九類分類、跨受試者、使用前1秒特徵）：**
+    **範例（九分類、跨受試者、使用所有特徵及前1秒數據）：**
     ```bash
-    python run_all.py --n-vids 28 --subject-type cross --session-length 1
+    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H
     ```
 
 ### 修改內容
@@ -91,3 +94,4 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 2.  改寫 `save_de.py`，將特徵提取結果以資料夾形式儲存，並使用 `pkl_to_mat.py` 合併特徵，方便依不同時間窗口進行分析。
 3.  參數化 `run_all.py`，加入 `session-length` 參數，可用於設定數據切割的時間窗口長度。
 4.  加入 `plot_result.py` 以實現簡易的結果可視化。
+5.  引入 `PSD` 和 `Hjorth` 兩種新特徵，可透過 `--feature` 參數進行選擇。
