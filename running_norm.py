@@ -6,7 +6,7 @@ import random
 import argparse
 import time
 
-parser = argparse.ArgumentParser(description='Running norm the EEG data of baseline model')
+parser = argparse.ArgumentParser(description='Multi-scale running norm for EEG data with different feature types')
 parser.add_argument('--timeLen', default=5, type=int,
                     help='time length in seconds')
 parser.add_argument('--use-data', default='de', type=str,
@@ -19,82 +19,79 @@ parser.add_argument('--randSeed', default=7, type=int,
                     help='random seed')
 parser.add_argument('--dataset', default='both', type=str,
                     help='first_batch or second_batch')
+parser.add_argument('--session-length', default=30, type=int,
+                    help='length of each video session in seconds')
 
 args = parser.parse_args()
 
 random.seed(args.randSeed)
 np.random.seed(args.randSeed)
 
-
-displace = False
+# Feature configuration
 use_features = args.use_data
 normTrain = args.normTrain
 n_vids = args.n_vids
 isCar = True
-randomInit = False
+sec = args.session_length
 
 root_dir = './'
 save_dir = os.path.join(root_dir, 'running_norm_'+ str(n_vids))
 
 bn_val = 1
-# rn_momentum = 0.995
-# print(rn_momentum)
-# momentum = 0.9
-
-sec = 15
 n_total = sec*n_vids
 n_counters = int(np.ceil(n_total / bn_val))
 
 n_subs = 123
 n_folds = 10
 n_per = round(n_subs / n_folds)
-feas = 5
+
 chn = 30
+fs = 250
+freqs_bn = 5
 
+# Main processing loop
 for decay_rate in [0.990]:
-    print(decay_rate)
+    print(f"Processing with decay rate: {decay_rate}")
     for fold in range(n_folds):
-    # for fold in range(n_folds-1, n_folds):
-        print(fold)
+        print(f"Processing fold {fold}")
+        
         if use_features == 'de':
-            # data = sio.loadmat(os.path.join(save_dir, 'deFeature_all.mat'))['deFeature_all']
-            data_name = 'data.mat'
+            data_name = 'data_binary.mat' if n_vids == 24 else 'data.mat'
             data = sio.loadmat(os.path.join(root_dir, data_name))['data']
-            print(data.shape)
-            data = data.transpose([0,2,3,1]).reshape(n_subs, 28*sec,  30*feas)
-            if n_vids == 24:
-                data = np.concatenate((data[:, :12*30, :], data[:, 16*30:, :]), 1)
-        elif use_features == 'CoCA':
-            if n_vids == 28:
-                data = sio.loadmat(os.path.join(save_dir, 'de_CoCA_fold%d.mat' % fold))['de_all']
-            elif n_vids == 24:
-                data = sio.loadmat(os.path.join(save_dir, 'de_CoCA_fold%d.mat' % fold))['de_all']
-        elif use_features == 'SA':
-            if n_vids == 28:
-                data = sio.loadmat(os.path.join(save_dir, 'de_%d.mat' % fold))['de_all']
-            elif n_vids == 24:
-                data = sio.loadmat(os.path.join(save_dir, 'de_%d.mat' % fold))['de_all']
-        elif (use_features == 'pretrained') or (use_features == 'simseqclr'):
-            if normTrain == 'yes':
-                data = sio.loadmat(os.path.join(save_dir, str(fold), 'features1_de_1s_normTrain.mat'))['de']
-            else:
-                data = sio.loadmat(os.path.join(save_dir, str(fold), 'features1_de_1s.mat'))['de']
-        print(data.shape)
-
+            print(f"Original data shape: {data.shape}")
+            
+            # Reshape: (subjects, channels, time_points, features) -> (subjects, time_points, all_features)
+            data = data.transpose([0,2,3,1]).reshape(n_subs, n_vids*sec, chn*freqs_bn)
+            print(f"Reshaped data shape: {data.shape}")
+        else:
+            # Handle other feature types if needed
+            continue
+            
+        # Define validation and training subjects
         if fold < n_folds-1:
             val_sub = np.arange(n_per*fold, n_per*(fold+1))
         else:
             val_sub = np.arange(n_per*fold, n_per*(fold+1)-1)
         train_sub = list(set(np.arange(n_subs)) - set(val_sub))
 
-        vid_order = video_order_load(args.dataset, n_vids)
-
-        data, vid_play_order_new = reorder_vids(data, vid_order)
-        print(vid_play_order_new)
-
+        # Load video order
+        if n_vids == 24:
+            vid_order_path = os.path.join(root_dir, 'vid_order_binary.mat')
+            if os.path.exists(vid_order_path):
+                vid_order = sio.loadmat(vid_order_path)['vid_order']
+            else:
+                vid_order = np.tile(np.arange(1, 25), (n_subs, 1))
+        else:
+            vid_order = video_order_load(args.dataset, 28)
+        
+        # Reorder videos
+        data, vid_play_order_new = reorder_vids(data, vid_order, session_length=sec)
+        
+        # Handle NaN values
         data[np.isnan(data)] = -30
         # data[data<=-30] = -30
         
+        # Calculate running normalization
         data_mean = np.mean(np.mean(data[train_sub, :, :], axis=1), axis=0)
         data_var = np.mean(np.var(data[train_sub, :, :], axis=1), axis=0)
         
@@ -124,6 +121,7 @@ for decay_rate in [0.990]:
             end_time = time.time()
             # print('time consumed: %.3f, counter: %d' % (end_time-start_time, counter+1))
 
+        # Reorder videos back to original order
         data_norm = reorder_vids_back(data_norm, vid_play_order_new)
         de = {'de': data_norm}
         print(data_norm.shape)

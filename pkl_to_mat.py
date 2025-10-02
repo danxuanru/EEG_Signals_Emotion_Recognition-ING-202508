@@ -2,6 +2,12 @@ import os
 import numpy as np
 import pickle
 import scipy.io as sio
+import argparse
+
+# Add command line argument for session length
+parser = argparse.ArgumentParser(description='Convert pickle files to mat format')
+parser.add_argument('--session-length', default=30, type=int, help='Length of each video session in seconds')
+args = parser.parse_args()
 
 data_DE_path = '../Features/DE_features'  # (28,32,30,5)
 
@@ -10,8 +16,10 @@ n_subs = 123
 n_vids = 28
 chn = 30
 fs = 250
-sec = 30
+sec = args.session_length  # Use session length from args
 freq = 5
+
+print(f"Using session length: {sec} seconds")
 
 # Process DE features
 DE_data_paths = os.listdir(data_DE_path)
@@ -23,21 +31,12 @@ for idx, path in enumerate(DE_data_paths):
     f = open(os.path.join(data_DE_path, path), 'rb')
     data_sub = pickle.load(f)
     print(f"DE subject {idx+1}, shape: {data_sub.shape}")
-    DE_data[idx, :, :, :, :] = data_sub[:, :-2, :, :]  # Assuming last 2 channels should be excluded
+    DE_data[idx, :, :, :, :] = data_sub[:, :-2, :sec, :]
 
 # Reshape DE features
 DE_data = DE_data.transpose([0, 2, 4, 1, 3]).reshape(n_subs, chn, freq, n_vids*sec)
 DE_data = DE_data.transpose([0, 1, 3, 2])
 print('DE data shape:', DE_data.shape)  # Should be (n_subs, chn, n_vids*sec, freq)
-
-# H_data: (n_subs, chn, n_vids*sec, freq, 3)
-# DE_data: (n_subs, chn, n_vids*sec, freq)
-# PSD_data: (n_subs, chn, n_vids*sec, freq)
-
-# Concatenate all features along the last dimension
-
-
-print('Combined data shape:', DE_data.shape)  # Should be (n_subs, chn, n_vids*sec, freq*3 + freq + freq + 1)
 
 # Save to .mat file
 total_data = {'data': DE_data}

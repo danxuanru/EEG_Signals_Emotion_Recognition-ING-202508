@@ -1,10 +1,10 @@
 import numpy as np
 import scipy.io as sio
 from io_utils import smooth_moving_average
-import os
 import h5py
 
-sec = 15
+# Default value, will be overridden by parameter
+sec = 30
 
 def load_srt_raw_newPre(data_dir, timeLen, timeStep, fs, channel_norm, time_norm, label_type):
     n_channs = 30

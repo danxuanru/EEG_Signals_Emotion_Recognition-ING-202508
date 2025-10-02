@@ -4,7 +4,8 @@ import os
 import copy
 # import hdf5storage
 
-sec = 15
+# Initialize with default value, will be updated by functions
+sec = 30
 
 def video_order_load(dataset,n_vids):
     datapath = '../After_remarks'
@@ -30,9 +31,14 @@ def video_order_load(dataset,n_vids):
     return vid_orders
 
 
-def reorder_vids(data, vid_play_order):
+def reorder_vids(data, vid_play_order, session_length=None):
     # data: (n_subs, n_points, n_feas)
+    global sec
+    if session_length is not None:
+        sec = session_length
+    
     n_vids = int(data.shape[1] / sec)
+    print("n_vids: ", n_vids, "session length:", sec)
     n_subs = data.shape[0]
     # Deep copy
     vid_play_order_copy = vid_play_order.copy()
@@ -43,7 +49,7 @@ def reorder_vids(data, vid_play_order):
         for sub in range(n_subs):
             tmp = vid_play_order_copy[sub,:]
             # tmp = tmp[(tmp<13)|(tmp>16)]
-            tmp[tmp>=17] = tmp[tmp>=17] - 4
+            # tmp[tmp>=17] = tmp[tmp>=17] - 4
             tmp = tmp - 1
             vid_play_order_new[sub, :] = tmp
 
@@ -76,8 +82,12 @@ def reorder_vids(data, vid_play_order):
 
 
 
-def reorder_vids_back(data, vid_play_order_new):
+def reorder_vids_back(data, vid_play_order_new, session_length=None):
     # data: (n_subs, n_points, n_feas)
+    global sec
+    if session_length is not None:
+        sec = session_length
+        
     n_vids = int(data.shape[1] / sec)
     n_subs = data.shape[0]
 

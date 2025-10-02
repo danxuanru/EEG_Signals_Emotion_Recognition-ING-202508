@@ -23,6 +23,7 @@ parser.add_argument('--valid-method', default='10-folds', type=str, help='the va
 parser.add_argument('--n-vids', default=28, type=int, help='number of video')
 # parser.add_argument('--label-type', default ='cls2', type=str, help='2 classifier or 9 classifier')
 parser.add_argument('--train-or-test',default='train',type=str,help='Using for strategy')
+parser.add_argument('--session-length', default=30, type=int, help='length of each video session in seconds')
 
 args = parser.parse_args()
 train_or_test = args.train_or_test
@@ -40,6 +41,8 @@ channel_norm = True
 subjects_type = args.subjects_type
 valid_method = args.valid_method
 n_vids = args.n_vids
+sec = args.session_length  # Use the session length from args
+
 
 if n_vids == 24:
     label_type = 'cls2'
@@ -53,7 +56,6 @@ elif valid_method == 'loo':
     n_folds = n_subs
 
 n_per = round(n_subs / n_folds) # # of sub in each fold 
-sec = 15
 
 timeLen = 1
 timeStep = 1
