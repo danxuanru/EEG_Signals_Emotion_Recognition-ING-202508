@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.io as sio
 from io_utils import smooth_moving_average
+import os
 import h5py
 
 # Default value, will be overridden by parameter

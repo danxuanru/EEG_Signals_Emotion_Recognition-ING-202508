@@ -19,12 +19,18 @@ parser.add_argument('--training-fold', default='all', type=str,
 parser.add_argument('--subjects-type', default='cross', type=str,
                     help='cross or intra subject')
 parser.add_argument('--valid-method', default='10-folds', type=str, help='the valid method, 10-folds or leave one out')
-parser.add_argument('--n-vids', default=24, type=int, help='number of video')
+parser.add_argument('--n-vids', default=28, type=int, help='number of video')
 parser.add_argument('--train-or-test',default='train',type=str,help='Using for strategy')
 parser.add_argument('--session-length', default=30, type=int, help='length of each video session in seconds')
+parser.add_argument('--remove-band', default=0, type=int, help='Remove specific frequency band (1-5) or None to include all bands')
 
 args = parser.parse_args()
 train_or_test = args.train_or_test
+remove_band = args.remove_band
+
+# Add frequency band mapping - updated to include None case
+band_names = {0: '0_None', 1: '1_Delta', 2: '2_Theta', 3: '3_Alpha', 4: '4_Beta', 5: '5_Gamma'}
+result_subdir = os.path.join('result', band_names[remove_band])
 
 random.seed(args.randSeed)
 np.random.seed(args.randSeed)
@@ -60,10 +66,10 @@ timeStep = 1
 isFilt = False
 filtLen = 1
 
-# create save directory
-save_dir = os.path.join('./', 'svm_weights')
+# create the weight directory
+save_dir = os.path.join(result_subdir, 'svm_weights')
 if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
+    os.makedirs(save_dir, exist_ok=True)
 
 # It works only when valid method is 10-folds
 if args.training_fold == 'all':
@@ -174,7 +180,7 @@ for fold in folds_list:
                 best_C = C
                 model_save_path = os.path.join(save_dir, 'subject_%s_vids_%s_fold_%s_valid_%s.joblib' %(subjects_type,str(n_vids),str(fold),valid_method))
                 joblib.dump(clf, model_save_path)
-            print('C', C, 'train acc:', train_acc, 'val acc:', val_acc)
+            # print('C', C, 'train acc:', train_acc, 'val acc:', val_acc)
 
         val_acc_folds[fold] = val_acc_best
         best_C_folds[fold] = best_C
@@ -211,5 +217,9 @@ elif train_or_test == 'test':
         subjects_score = [np.sum(subjects_results_[i, :] == label_val_[i, :]) / subjects_results_.shape[1] for i in range(0, n_subs)]
         subjects_score = np.array(subjects_score).reshape(n_subs,-1)
 
-    pd.DataFrame(subjects_score).to_csv(os.path.join('subject_%s_vids_%s_valid_%s.csv' %(subjects_type,str(n_vids),valid_method)))
-    print('acc mean: %.4f, std: %.4f' % (np.mean(subjects_score), np.std(subjects_score)))
+    # Ensure result subdirectory exists
+    if not os.path.exists(result_subdir):
+        os.makedirs(result_subdir, exist_ok=True)
+    
+    pd.DataFrame(subjects_score).to_csv(os.path.join(result_subdir, 'subject_%s_vids_%s_valid_%s.csv' %(subjects_type,str(n_vids),valid_method)))
+

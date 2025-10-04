@@ -1,6 +1,5 @@
 import numpy as np
 import pickle
-import mne
 import os
 import argparse
 from scipy.signal.windows import hann

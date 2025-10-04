@@ -1,7 +1,9 @@
 import argparse
 import numpy as np
+import torch
 import os
 import scipy.io as sio
+import pickle
 import random
 
 def LDS(sequence):
@@ -51,12 +53,15 @@ parser.add_argument('--smooth-length', default=30, type=int,
                     help='the length for lds smooth')
 parser.add_argument('--dataset', default='both', type=str,
                     help='first_batch or second_batch')
+parser.add_argument('--session-length', default=30, type=int,
+                    help='length of each video session in seconds')
 args = parser.parse_args()
 
 
 random.seed(args.randSeed)
 np.random.seed(args.randSeed)
 n_vids = args.n_vids
+sec = args.session_length  # Use the session length from args
 
 root_dir = './running_norm_%s/normTrain_rnPreWeighted0.990_newPre_%svideo_car' % (n_vids, n_vids)
 save_dir = './smooth_' + str(n_vids)

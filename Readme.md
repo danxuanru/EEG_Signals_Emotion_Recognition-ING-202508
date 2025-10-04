@@ -29,18 +29,27 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
     python save_hjorth_re.py
     ```
 
-2.  **Run the full pipeline**
-    Next, use `run_all.py` to execute the entire pipeline. This script merges the selected features, performs normalization, and handles classification and result plotting.
+2.  **Run Analysis for a Specific Configuration**
+    Use `run_all.py` to execute the entire pipeline for a single, specific configuration. This script merges features, performs normalization, and handles classification and result plotting.
 
     **Parameters:**
     *   `--n-vids`: Number of videos. Use `24` for binary classification (positive/negative) or `28` for nine-category classification.
     *   `--subject-type`: Type of analysis. Use `cross` for cross-subject or `intra` for intra-subject analysis.
     *   `--session-length`: Specifies the number of seconds to use from the beginning of the 30-second feature data provided for each video.
     *   `--feature`: The combination of features to use. Options are `DE` (default), `DE_PSD` (DE + PSD), or `DE_PSD_H` (DE + PSD + Hjorth).
+    *   `--remove-band`: Specifies a frequency band to **keep** for analysis, removing all others. `0` for all bands (default), `1` for Delta, `2` for Theta, `3` for Alpha, `4` for Beta, `5` for Gamma.
 
-    **Example (Nine-category, cross-subject, using all features for the first second):**
+    **Example (Nine-category, cross-subject, using all features for the first second, Alpha band only):**
     ```bash
-    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H
+    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H --remove-band 3
+    ```
+
+3.  **Run Analysis for All Frequency Bands (Loop)**
+    To automatically run the analysis for all bands and for each individual band, use `run_all_loop.py`. This script will execute `run_all.py` multiple times with the appropriate `--remove-band` setting for each case.
+
+    **Example (Looping through all bands with 1-second features):**
+    ```bash
+    python run_all_loop.py --session-length 1 --feature DE_PSD_H
     ```
 
 ### Modifications
@@ -51,6 +60,7 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 4.  Added `plot_result.py` for simple result visualization.
 5.  Introduced `PSD` and `Hjorth` as new features, selectable via the `--feature` argument, with dedicated extraction scripts (`save_psd_sum.py`, `save_hjorth_re.py`).
 6.  Implemented multi-scale normalization in `running_norm.py` to process each feature type (DE, PSD, Hjorth) independently.
+7.  Added `run_all_loop.py` and a `--remove-band` parameter to `run_all.py` to support analysis on individual frequency bands (Delta, Theta, Alpha, Beta, Gamma).
 
 ---
 
@@ -79,18 +89,27 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
     python save_hjorth_re.py
     ```
 
-2.  **執行完整流程**
-    接著，使用 `run_all.py` 執行整個流程。此腳本會整合選擇的特徵、執行正規化、處理分類及繪製結果。
+2.  **執行特定設定的分析**
+    使用 `run_all.py` 執行單一特定設定的完整流程。此腳本會整合特徵、執行正規化、處理分類及繪製結果。
 
     **參數說明：**
     *   `--n-vids`：影片數量。二元分類（正面／負面）使用 `24`，九分類使用 `28`。
     *   `--subject-type`：分析類型。`cross` 為跨受試者分析，`intra` 為受試者內分析。
     *   `--session-length`：指定使用每個影片所提供之 30 秒特徵數據的前幾秒。
     *   `--feature`：要使用的特徵組合。可選 `DE`（預設）、`DE_PSD`（DE + PSD）或 `DE_PSD_H`（DE + PSD + Hjorth）。
+    *   `--remove-band`：指定要**保留**用於分析的頻帶，並移除其他頻帶。`0` 為所有頻帶（預設），`1` 為 Delta，`2` 為 Theta，`3` 為 Alpha，`4` 為 Beta，`5` 為 Gamma。
 
-    **範例（九分類、跨受試者、使用所有特徵的第一秒數據）：**
+    **範例（九分類、跨受試者、使用所有特徵的第一秒數據、僅 Alpha 頻帶）：**
     ```bash
-    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H
+    python run_all.py --n-vids 28 --subject-type cross --session-length 1 --feature DE_PSD_H --remove-band 3
+    ```
+
+3.  **對所有頻帶執行分析（循環）**
+    若要自動對所有頻帶及單獨每個頻帶進行分析，請使用 `run_all_loop.py`。此腳本會為每種情況使用對應的 `--remove-band` 參數多次執行 `run_all.py`。
+
+    **範例（使用 1 秒特徵循環執行所有頻帶分析）：**
+    ```bash
+    python run_all_loop.py --session-length 1 --feature DE_PSD_H
     ```
 
 ### 修改內容
@@ -101,3 +120,4 @@ The `io_utils.py`, `reorder_vids.py`, and `load_data.py` include relevant classe
 4.  加入 `plot_result.py` 以實現簡易的結果可視化。
 5.  引入 `PSD` 和 `Hjorth` 兩種新特徵，可透過 `--feature` 參數進行選擇，並提供專門的提取腳本（`save_psd_sum.py`, `save_hjorth_re.py`）。
 6.  在 `running_norm.py` 中實現多尺度正規化，對每種特徵類型（DE, PSD, Hjorth）進行獨立處理。
+7.  新增 `run_all_loop.py` 並在 `run_all.py` 中加入 `--remove-band` 參數，以支援對單獨頻帶（Delta, Theta, Alpha, Beta, Gamma）進行分析。

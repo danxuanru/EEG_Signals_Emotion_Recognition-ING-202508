@@ -4,7 +4,7 @@ import mne
 import os
 import argparse
 from scipy import signal
-import h5py
+
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Hjorth feature extraction for EEG data')

@@ -14,8 +14,12 @@ parser.add_argument('--kernel', default='', type=str,
                     help='Kernel type (rbf, linear, etc.)')
 parser.add_argument('--session-length', default=30, type=int,
                     help='Length of each video session in seconds')
+parser.add_argument('--remove-band', default=0, type=int, help='Remove specific frequency band (1-5) or None to include all bands')
 args = parser.parse_args()
 
+# Add frequency band mapping
+band_names = {0: '0_None', 1: '1_Delta', 2: '2_Theta', 3: '3_Alpha', 4: '4_Beta', 5: '5_Gamma'}
+result_subdir = os.path.join('result', band_names[args.remove_band])
 
 # Construct the filename dynamically
 filename = f'subject_{args.subject_type}_vids_{args.n_vids}_valid_10-folds'
@@ -25,8 +29,12 @@ if args.kernel == 'rbf':
 #     filename += f'_sec_{args.session_length}'
 filename += '.csv'
 
+# Update file path to include result subdirectory
+file_path = os.path.join(result_subdir, filename)
+print(f"Loading results from: {file_path}")
+
 # Read accuracy data from CSV
-accuracy_data = pd.read_csv(filename, delimiter=',')
+accuracy_data = pd.read_csv(file_path, delimiter=',')
 accuracy_data = accuracy_data.iloc[:, 1:]  # Skip the first column if it's an index
 print(accuracy_data.head())
 
@@ -82,6 +90,12 @@ if args.session_length != 30:  # Only add session length to filename if it's not
     output_filename += f'_sec_{args.session_length}'
 output_filename += '.png'
 
-plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-print(f"Plot saved as {output_filename}")
+# Update output path to include result subdirectory
+output_path = os.path.join(result_subdir, output_filename)
+# Ensure result subdirectory exists
+if not os.path.exists(result_subdir):
+    os.makedirs(result_subdir, exist_ok=True)
+    
+plt.savefig(output_path, dpi=300, bbox_inches='tight')
+print(f"Plot saved as {output_path}")
 plt.close()

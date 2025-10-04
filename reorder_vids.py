@@ -53,7 +53,7 @@ def reorder_vids(data, vid_play_order, session_length=None):
             tmp = tmp - 1
             vid_play_order_new[sub, :] = tmp
 
-            print('video arrange:', tmp)
+            # print('video arrange:', tmp)
 
             data_sub = data[sub, :, :]
             data_sub = data_sub.reshape(n_vids, sec, data_sub.shape[-1])

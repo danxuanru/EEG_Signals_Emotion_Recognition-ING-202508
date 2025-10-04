@@ -21,7 +21,10 @@ parser.add_argument('--dataset', default='both', type=str,
                     help='first_batch or second_batch')
 parser.add_argument('--session-length', default=30, type=int,
                     help='length of each video session in seconds')
+parser.add_argument('--remove-band', default=0, type=int,
+                    help='Remove specific frequency band (1-5) or None to include all bands')
 parser.add_argument('--feature', default='DE', choices=['DE', 'DE_PSD', 'DE_PSD_H'], help='Feature combination: DE, DE_PSD, or DE_PSD_H')
+
 args = parser.parse_args()
 
 random.seed(args.randSeed)
@@ -33,6 +36,7 @@ normTrain = args.normTrain
 n_vids = args.n_vids
 isCar = True
 sec = args.session_length
+remove_band = args.remove_band
 
 root_dir = './'
 save_dir = os.path.join(root_dir, 'running_norm_'+ str(n_vids))
@@ -47,11 +51,11 @@ n_per = round(n_subs / n_folds)
 
 chn = 30
 fs = 250
-freqs_bn = 5
+freqs_bn = 4 if remove_band in [1, 2, 3, 4, 5] else 5  # Adjust frequency bands based on removed band
 feature = args.feature
 
-# Feature dimensions: Hjorth(10) + DE(5) + PSD(5) = 20 features per channel
-hjorth_features = freqs_bn * 2  # 10 features (activity, mobility for 5 freq bands)
+# Feature dimensions: Hjorth(10) + DE(5) + PSD(5) = 25 features per channel
+hjorth_features = freqs_bn * 2  # 10 features (mobility, complexity for 5 freq bands)
 de_features = freqs_bn         # 5 features
 psd_features = freqs_bn        # 5 features
 
@@ -79,12 +83,33 @@ def apply_multiscale_running_norm(data, train_sub, decay_rate=0.990):
     # Calculate features per channel
     n_features_per_channel = n_total_features // chn
     
-    # Feature type boundaries (per channel)
-    hjorth_end = hjorth_features
-    de_end = hjorth_end + de_features
-    psd_end = de_end + psd_features
+    # Determine feature structure based on selected feature type
+    if feature == 'DE':
+        # Only DE features exist
+        de_start = 0
+        de_end = de_features
+        has_psd = False
+        has_hjorth = False
+    elif feature == 'DE_PSD':
+        # Only DE and PSD features exist
+        de_start = 0
+        de_end = de_features
+        psd_start = de_end
+        psd_end = de_end + psd_features
+        has_psd = True
+        has_hjorth = False
+    elif feature == 'DE_PSD_H':
+        # All three feature types exist
+        hjorth_start = 0
+        hjorth_end = hjorth_features
+        de_start = hjorth_end
+        de_end = de_start + de_features
+        psd_start = de_end
+        psd_end = psd_start + psd_features
+        has_psd = True
+        has_hjorth = True
     
-    print(f"Feature boundaries per channel: Hjorth(0-{hjorth_end}), DE({hjorth_end}-{de_end}), PSD({de_end}-{psd_end})")
+    print(f"Feature structure: {'Hjorth+' if has_hjorth else ''}DE{'+PSD' if has_psd else ''}")
     
     data_norm = np.zeros_like(data)
     
@@ -97,85 +122,91 @@ def apply_multiscale_running_norm(data, train_sub, decay_rate=0.990):
         ch_end = (ch + 1) * n_features_per_channel
         ch_data = data[:, :, ch_start:ch_end]
         
-        # Split into feature types
-        hjorth_data = ch_data[:, :, :hjorth_features]
-        de_data = ch_data[:, :, hjorth_features:hjorth_end + de_features] 
-        psd_data = ch_data[:, :, hjorth_end + de_features:]
+        # Extract feature type data based on selected feature combination
+        if has_hjorth:
+            hjorth_data = ch_data[:, :, hjorth_start:hjorth_end]
+            print(f"Channel {ch+1} - Hjorth range: [{np.min(hjorth_data):.2e}, {np.max(hjorth_data):.2e}]")
+            hjorth_mean = np.mean(np.mean(hjorth_data[train_sub, :, :], axis=1), axis=0)
+            hjorth_var = np.mean(np.var(hjorth_data[train_sub, :, :], axis=1), axis=0)
         
-        # Calculate baseline statistics for each feature type (training subjects only)
-        hjorth_mean = np.mean(np.mean(hjorth_data[train_sub, :, :], axis=1), axis=0)
-        hjorth_var = np.mean(np.var(hjorth_data[train_sub, :, :], axis=1), axis=0)
-        
+        de_data = ch_data[:, :, de_start:de_end]
+        print(f"Channel {ch+1} - DE range: [{np.min(de_data):.2e}, {np.max(de_data):.2e}]")
         de_mean = np.mean(np.mean(de_data[train_sub, :, :], axis=1), axis=0)
         de_var = np.mean(np.var(de_data[train_sub, :, :], axis=1), axis=0)
         
-        psd_mean = np.mean(np.mean(psd_data[train_sub, :, :], axis=1), axis=0)
-        psd_var = np.mean(np.var(psd_data[train_sub, :, :], axis=1), axis=0)
-        
-        print(f"Channel {ch+1} - Hjorth range: [{np.min(hjorth_data):.2e}, {np.max(hjorth_data):.2e}]")
-        print(f"Channel {ch+1} - DE range: [{np.min(de_data):.2e}, {np.max(de_data):.2e}]")
-        print(f"Channel {ch+1} - PSD range: [{np.min(psd_data):.2e}, {np.max(psd_data):.2e}]")
+        if has_psd:
+            psd_data = ch_data[:, :, psd_start:psd_end]
+            print(f"Channel {ch+1} - PSD range: [{np.min(psd_data):.2e}, {np.max(psd_data):.2e}]")
+            psd_mean = np.mean(np.mean(psd_data[train_sub, :, :], axis=1), axis=0)
+            psd_var = np.mean(np.var(psd_data[train_sub, :, :], axis=1), axis=0)
         
         # Apply running normalization to each subject
         for sub in range(n_subs):
-            # Initialize running statistics for each feature type
-            hjorth_running_sum = np.zeros(hjorth_features)
-            hjorth_running_square = np.zeros(hjorth_features)
+            # Initialize running statistics
+            if has_hjorth:
+                hjorth_running_sum = np.zeros(hjorth_features)
+                hjorth_running_square = np.zeros(hjorth_features)
             
             de_running_sum = np.zeros(de_features)
             de_running_square = np.zeros(de_features)
             
-            psd_running_sum = np.zeros(psd_features)
-            psd_running_square = np.zeros(psd_features)
+            if has_psd:
+                psd_running_sum = np.zeros(psd_features)
+                psd_running_square = np.zeros(psd_features)
             
             decay_factor = 1.0
             
             for counter in range(n_counters):
-                # Extract current time step data for each feature type
-                hjorth_one = hjorth_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                # Extract current time step data
+                if has_hjorth:
+                    hjorth_one = hjorth_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                    hjorth_one_squeezed = np.squeeze(hjorth_one, axis=0) if hjorth_one.shape[0] == 1 else hjorth_one
+                
                 de_one = de_data[sub, counter*bn_val:(counter+1)*bn_val, :]
-                psd_one = psd_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                de_one_squeezed = np.squeeze(de_one, axis=0) if de_one.shape[0] == 1 else de_one
                 
-                # Squeeze the time dimension to match running stats arrays
-                hjorth_one_squeezed = np.squeeze(hjorth_one, axis=0)
-                de_one_squeezed = np.squeeze(de_one, axis=0)
-                psd_one_squeezed = np.squeeze(psd_one, axis=0)
-
-                # Update running statistics for Hjorth features
-                hjorth_running_sum += hjorth_one_squeezed
-                hjorth_running_mean = hjorth_running_sum / (counter + 1)
-                hjorth_running_square += hjorth_one_squeezed**2
-                hjorth_running_var = (hjorth_running_square - 2 * hjorth_running_mean * hjorth_running_sum) / (counter + 1) + hjorth_running_mean**2
+                if has_psd:
+                    psd_one = psd_data[sub, counter*bn_val:(counter+1)*bn_val, :]
+                    psd_one_squeezed = np.squeeze(psd_one, axis=0) if psd_one.shape[0] == 1 else psd_one
                 
-                # Update running statistics for DE features
+                # Update running statistics and normalize each feature type
+                if has_hjorth:
+                    # Hjorth processing code
+                    hjorth_running_sum += hjorth_one_squeezed
+                    hjorth_running_mean = hjorth_running_sum / (counter + 1)
+                    hjorth_running_square += hjorth_one_squeezed**2
+                    hjorth_running_var = (hjorth_running_square - 2 * hjorth_running_mean * hjorth_running_sum) / (counter + 1) + hjorth_running_mean**2
+                    hjorth_curr_mean = decay_factor*hjorth_mean + (1-decay_factor)*hjorth_running_mean
+                    hjorth_curr_var = decay_factor*hjorth_var + (1-decay_factor)*hjorth_running_var
+                    hjorth_norm = (hjorth_one - hjorth_curr_mean) / np.sqrt(hjorth_curr_var + 1e-10)
+                
+                # DE processing
                 de_running_sum += de_one_squeezed
                 de_running_mean = de_running_sum / (counter + 1)
                 de_running_square += de_one_squeezed**2
                 de_running_var = (de_running_square - 2 * de_running_mean * de_running_sum) / (counter + 1) + de_running_mean**2
-                
-                # Update running statistics for PSD features
-                psd_running_sum += psd_one_squeezed
-                psd_running_mean = psd_running_sum / (counter + 1)
-                psd_running_square += psd_one_squeezed**2
-                psd_running_var = (psd_running_square - 2 * psd_running_mean * psd_running_sum) / (counter + 1) + psd_running_mean**2
-                
-                # Calculate current normalization parameters for each feature type
-                hjorth_curr_mean = decay_factor*hjorth_mean + (1-decay_factor)*hjorth_running_mean
-                hjorth_curr_var = decay_factor*hjorth_var + (1-decay_factor)*hjorth_running_var
-                
                 de_curr_mean = decay_factor*de_mean + (1-decay_factor)*de_running_mean
                 de_curr_var = decay_factor*de_var + (1-decay_factor)*de_running_var
-                
-                psd_curr_mean = decay_factor*psd_mean + (1-decay_factor)*psd_running_mean
-                psd_curr_var = decay_factor*psd_var + (1-decay_factor)*psd_running_var
-                
-                # Apply feature-specific normalization
-                hjorth_norm = (hjorth_one - hjorth_curr_mean) / np.sqrt(hjorth_curr_var + 1e-10)
                 de_norm = (de_one - de_curr_mean) / np.sqrt(de_curr_var + 1e-8)
-                psd_norm = (psd_one - psd_curr_mean) / np.sqrt(psd_curr_var + 1e-8)
                 
-                # Combine normalized features back
-                combined_norm = np.concatenate([hjorth_norm, de_norm, psd_norm], axis=-1)
+                if has_psd:
+                    # PSD processing
+                    psd_running_sum += psd_one_squeezed
+                    psd_running_mean = psd_running_sum / (counter + 1)
+                    psd_running_square += psd_one_squeezed**2
+                    psd_running_var = (psd_running_square - 2 * psd_running_mean * psd_running_sum) / (counter + 1) + psd_running_mean**2
+                    psd_curr_mean = decay_factor*psd_mean + (1-decay_factor)*psd_running_mean
+                    psd_curr_var = decay_factor*psd_var + (1-decay_factor)*psd_running_var
+                    psd_norm = (psd_one - psd_curr_mean) / np.sqrt(psd_curr_var + 1e-8)
+                
+                # Combine normalized features based on selected feature type
+                if feature == 'DE':
+                    combined_norm = de_norm
+                elif feature == 'DE_PSD':
+                    combined_norm = np.concatenate([de_norm, psd_norm], axis=-1)
+                elif feature == 'DE_PSD_H':
+                    combined_norm = np.concatenate([hjorth_norm, de_norm, psd_norm], axis=-1)
+                
                 data_norm[sub, counter*bn_val:(counter+1)*bn_val, ch_start:ch_end] = combined_norm
                 
                 # Update decay factor
