@@ -10,21 +10,18 @@ import argparse
 from sklearn.preprocessing import StandardScaler
 
 parser = argparse.ArgumentParser(description='Running normalization for AsI filtered data')
-parser.add_argument('--n-vids', default=24, type=int, help='Number of videos')
-parser.add_argument('--session-length', default=30, type=int, help='Session length in seconds')
 parser.add_argument('--feature', default='DE', type=str, help='Feature type')
 parser.add_argument('--remove-band', default=0, type=int, help='Frequency band to remove')
 parser.add_argument('--random-state', default=42, type=int, help='Random state for reproducibility')
 args = parser.parse_args()
 
-n_vids = args.n_vids
-session_length = args.session_length
+
 feature_type = args.feature
 remove_band = args.remove_band
 random_state = args.random_state
 
 # Load data
-mat_file = './pooled_data.mat'
+mat_file = f'./pooled_data_{feature_type}.mat'
 print(f"Loading {mat_file}...")
 if not os.path.exists(mat_file):
     print(f"Error: {mat_file} not found!")

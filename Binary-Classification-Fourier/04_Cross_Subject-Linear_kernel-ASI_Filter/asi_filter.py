@@ -123,6 +123,7 @@ def calculate_asi_for_window(window_data, baseline_data, channel_indices, fs=250
         channel_indices: 電極索引字典 {'Fp1': idx, 'Fp2': idx, 'Fz': idx}
         fs: 採樣頻率 (預設=250 Hz)
         A, B: MDI 參數
+        max_removed_ratio: 最大可移除窗口比例（預設 0.5），會傳遞給 process_subject_data
     
     返回:
         asi_fp: Fp1-Fp2 組的 AsI 值
@@ -227,9 +228,10 @@ def extract_neutral_videos_as_baseline(subject_data, neutral_indices, session_se
 
 
 def process_subject_data(subject_data, video_order, subject_idx, output_file, channel_indices, 
-                        session_sec=30, window_sec=1, fs=250, A=5, B=5):
+                        session_sec=30, window_sec=1, overlap_ratio=0.5, fs=250, A=5, B=5,
+                        max_removed_ratio=0.5):
     """
-    處理單個受試者的資料，應用 AsI 濾波
+    處理單個受試者的資料，應用 AsI 濾波（支援重疊視窗）
     
     參數:
         subject_data: 受試者完整資料 (n_trials, n_channels, n_samples)
@@ -239,8 +241,10 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
         channel_indices: 電極索引字典
         session_sec: 每個影片的長度（秒）
         window_sec: 窗口長度(秒)
+        overlap_ratio: 重疊比例 (0.0 = 無重疊, 0.5 = 50%重疊, 0.75 = 75%重疊)
         fs: 採樣頻率
         A, B: MDI 參數
+        max_removed_ratio: 最大可移除窗口比例（預設 0.5，對應原始版本的 15/30 規則）
     
     返回:
         filtered_info: 過濾資訊字典
@@ -261,7 +265,16 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
     # 資料格式: (n_trials, n_channels, n_samples)
     n_trials, n_channels, n_samples = subject_data.shape
     window_samples = window_sec * fs
-    n_windows_per_trial = n_samples // window_samples
+    
+    # 計算重疊視窗的步長
+    step_samples = int(window_samples * (1 - overlap_ratio))
+    
+    # 計算每個 trial 的視窗數量（含重疊）
+    n_windows_per_trial = (n_samples - window_samples) // step_samples + 1
+    base_windows_per_trial = n_samples // window_samples
+    
+    print(f"  視窗設定: 長度={window_sec}s, 重疊={overlap_ratio*100}%, 步長={step_samples}樣本")
+    print(f"  每個 trial 視窗數: {n_windows_per_trial}")
     
     # 儲存過濾結果
     filtered_data = []
@@ -273,7 +286,15 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
         'total_windows': n_trials * n_windows_per_trial,
         'removed_windows': [],
         'removed_trials': [],
-        'asi_values': []
+        'asi_values': [],
+        'window_config': {
+            'window_sec': window_sec,
+            'overlap_ratio': overlap_ratio,
+            'step_samples': step_samples,
+            'n_windows_per_trial': n_windows_per_trial,
+            'base_windows_per_trial': base_windows_per_trial,
+            'max_removed_ratio': max_removed_ratio
+        }
     }
     
     # 對每個 trial 進行處理（跳過中性影片本身）
@@ -284,13 +305,17 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
         
         trial_data = subject_data[trial_idx]  # (n_channels, n_samples)
         
-        # 切分窗口
+        # 切分重疊視窗
         windows_to_keep = []
         window_asi_values = []
         
         for win_idx in range(n_windows_per_trial):
-            start_idx = win_idx * window_samples
+            start_idx = win_idx * step_samples
             end_idx = start_idx + window_samples
+            
+            # 確保不超出範圍
+            if end_idx > n_samples:
+                break
             
             window = trial_data[:, start_idx:end_idx]
             
@@ -318,42 +343,47 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
             'asi_values': window_asi_values
         })
         
-        # 檢查是否需要移除整個 trial (超過 15 個窗口被移除)
-        removed_windows_count = n_windows_per_trial - len(windows_to_keep)
-        if removed_windows_count > 15:
+        # 檢查是否需要移除整個 trial
+        removed_windows_count = len(window_asi_values) - len(windows_to_keep)
+        allowed_removed = max(1, int(np.ceil(base_windows_per_trial * max_removed_ratio)))
+
+        if removed_windows_count > allowed_removed:
             filtered_info['removed_trials'].append(
-                f"Trial {trial_idx} (Video {int(video_order[trial_idx])}, 移除窗口數: {removed_windows_count}/{n_windows_per_trial})"
+                f"Trial {trial_idx} (Video {int(video_order[trial_idx])}, 移除窗口數: {removed_windows_count}/{len(window_asi_values)})"
             )
-            # 即使移除整個 trial，也保留原始資料但標記為已移除
             filtered_data.append({
                 'trial_idx': trial_idx,
                 'video_num': int(video_order[trial_idx]),
                 'data': trial_data,
-                'kept_windows': [],  # 空列表表示整個 trial 被移除
-                'removed': True
+                'kept_windows': [],
+                'removed': True,
+                'step_samples': step_samples,
+                'window_samples': window_samples
             })
         else:
-            # 保留 trial，記錄哪些窗口被保留
             filtered_data.append({
                 'trial_idx': trial_idx,
                 'video_num': int(video_order[trial_idx]),
                 'data': trial_data,
                 'kept_windows': windows_to_keep,
-                'removed': False
+                'removed': False,
+                'step_samples': step_samples,
+                'window_samples': window_samples
             })
     
-    # 儲存過濾後的資料（即使為空也要儲存）
+    # 儲存過濾後的資料
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
-    # 儲存完整資料結構（包含原始資料和過濾資訊）
     save_dict = {
-        'filtered_trials': filtered_data,  # 列表，每個元素是一個字典
+        'filtered_trials': filtered_data,
         'filtered_info': filtered_info,
         'metadata': {
             'n_trials': n_trials,
             'n_channels': n_channels,
             'n_samples': n_samples,
             'window_samples': window_samples,
+            'step_samples': step_samples,
+            'overlap_ratio': overlap_ratio,
             'n_windows_per_trial': n_windows_per_trial,
             'session_sec': session_sec,
             'window_sec': window_sec,
@@ -368,73 +398,45 @@ def process_subject_data(subject_data, video_order, subject_idx, output_file, ch
         kept_trials = sum(1 for t in filtered_data if not t['removed'])
         print(f"  已儲存: {kept_trials}/{len(filtered_data)} trials 保留")
     else:
-        print(f"  警告: 沒有保留任何情緒 trials（所有都被移除或只有中性影片）")
+        print(f"  警告: 沒有保留任何情緒 trials")
     
     return filtered_info
 
 
-def extract_filtered_data(filtered_file, output_format='concatenate'):
+def extract_filtered_data(filtered_file, output_format='windows'):
     """
-    從過濾後的檔案中提取資料
+    從過濾後的檔案中提取資料（支援重疊視窗）
     
     參數:
         filtered_file: 過濾後的 pickle 檔案路徑
         output_format: 輸出格式
-            - 'concatenate': 拼接所有保留的窗口 (n_kept_trials, n_channels, variable_length)
-            - 'windows': 返回窗口級別的資料 (n_total_windows, n_channels, window_samples)
-            - 'trials': 返回 trial 級別的完整資料，移除的窗口用 NaN 填充
+            - 'windows': 返回窗口級別的資料 (推薦)
+            - 'concatenate': 拼接所有保留的窗口
+            - 'trials': 返回 trial 級別的完整資料
     
     返回:
         根據 output_format 返回不同格式的資料
     """
-    # 檢查文件是否存在
     if not os.path.exists(filtered_file):
         raise FileNotFoundError(f"找不到文件: {filtered_file}")
     
-    # 檢查文件是否為空
     if os.path.getsize(filtered_file) == 0:
-        raise ValueError(f"文件為空: {filtered_file}\n請先運行 asi_filter.py 生成過濾後的資料")
+        raise ValueError(f"文件為空: {filtered_file}")
     
-    # 讀取資料
     try:
         with open(filtered_file, 'rb') as f:
             data_dict = pickle.load(f)
-    except EOFError:
-        raise EOFError(f"文件損壞或不完整: {filtered_file}\n請重新運行 asi_filter.py 生成資料")
     except Exception as e:
-        raise Exception(f"讀取文件時發生錯誤: {filtered_file}\n錯誤訊息: {str(e)}")
+        raise Exception(f"讀取文件時發生錯誤: {str(e)}")
     
     filtered_trials = data_dict['filtered_trials']
     metadata = data_dict['metadata']
-    window_samples = metadata['window_samples']
     
-    if output_format == 'concatenate':
-        # 拼接每個 trial 中保留的窗口
-        result = []
-        for trial_dict in filtered_trials:
-            if trial_dict['removed']:
-                continue
-            
-            trial_data = trial_dict['data']
-            kept_windows = trial_dict['kept_windows']
-            
-            if len(kept_windows) > 0:
-                kept_data = []
-                for win_idx in kept_windows:
-                    start_idx = win_idx * window_samples
-                    end_idx = start_idx + window_samples
-                    kept_data.append(trial_data[:, start_idx:end_idx])
-                
-                # 拼接該 trial 的所有保留窗口
-                trial_concatenated = np.concatenate(kept_data, axis=1)
-                result.append(trial_concatenated)
-        
-        return result
-    
-    elif output_format == 'windows':
-        # 返回所有保留的窗口作為獨立樣本
+    if output_format == 'windows':
+        # 返回所有保留的窗口作為獨立樣本（最推薦）
         result = []
         labels = []
+        window_indices = []  # 記錄每個視窗的位置資訊
         
         for trial_dict in filtered_trials:
             if trial_dict['removed']:
@@ -443,24 +445,66 @@ def extract_filtered_data(filtered_file, output_format='concatenate'):
             trial_data = trial_dict['data']
             kept_windows = trial_dict['kept_windows']
             video_num = trial_dict['video_num']
+            trial_idx = trial_dict['trial_idx']
+            
+            # 從 trial_dict 或 metadata 取得參數
+            window_samples = trial_dict.get('window_samples', metadata['window_samples'])
+            step_samples = trial_dict.get('step_samples', metadata['step_samples'])
             
             for win_idx in kept_windows:
-                start_idx = win_idx * window_samples
+                start_idx = win_idx * step_samples
                 end_idx = start_idx + window_samples
+                
+                if end_idx > trial_data.shape[1]:
+                    continue
+                
                 window_data = trial_data[:, start_idx:end_idx]
                 result.append(window_data)
                 labels.append(video_num)
+                window_indices.append({
+                    'trial_idx': trial_idx,
+                    'window_idx': win_idx,
+                    'start_sample': start_idx,
+                    'end_sample': end_idx
+                })
         
         if len(result) > 0:
             result = np.array(result)
+            print(f"提取了 {len(result)} 個視窗 (含重疊)")
         else:
             print("警告: 沒有保留任何窗口資料")
-            result = np.array([])  # 返回空陣列
+            result = np.array([])
         
         return result, labels
     
+    elif output_format == 'concatenate':
+        # 拼接每個 trial 中保留的窗口（不推薦用於重疊視窗）
+        result = []
+        for trial_dict in filtered_trials:
+            if trial_dict['removed']:
+                continue
+            
+            trial_data = trial_dict['data']
+            kept_windows = trial_dict['kept_windows']
+            window_samples = trial_dict.get('window_samples', metadata['window_samples'])
+            step_samples = trial_dict.get('step_samples', metadata['step_samples'])
+            
+            if len(kept_windows) > 0:
+                kept_data = []
+                for win_idx in kept_windows:
+                    start_idx = win_idx * step_samples
+                    end_idx = start_idx + window_samples
+                    if end_idx <= trial_data.shape[1]:
+                        kept_data.append(trial_data[:, start_idx:end_idx])
+                
+                if len(kept_data) > 0:
+                    trial_concatenated = np.concatenate(kept_data, axis=1)
+                    result.append(trial_concatenated)
+        
+        return result
+    
     elif output_format == 'trials':
-        # 返回 trial 級別資料，移除的窗口用 NaN 填充
+        # 返回 trial 級別資料（保持原始結構）
         result = []
         
         for trial_dict in filtered_trials:
@@ -469,22 +513,24 @@ def extract_filtered_data(filtered_file, output_format='concatenate'):
             
             trial_data = trial_dict['data'].copy()
             kept_windows = trial_dict['kept_windows']
+            window_samples = trial_dict.get('window_samples', metadata['window_samples'])
+            step_samples = trial_dict.get('step_samples', metadata['step_samples'])
             n_windows = metadata['n_windows_per_trial']
             
             # 將未保留的窗口設為 NaN
             for win_idx in range(n_windows):
                 if win_idx not in kept_windows:
-                    start_idx = win_idx * window_samples
+                    start_idx = win_idx * step_samples
                     end_idx = start_idx + window_samples
-                    trial_data[:, start_idx:end_idx] = np.nan
+                    if end_idx <= trial_data.shape[1]:
+                        trial_data[:, start_idx:end_idx] = np.nan
             
             result.append(trial_data)
         
         if len(result) > 0:
             result = np.array(result)
         else:
-            print("警告: 沒有保留任何 trial 資料")
-            result = np.array([])  # 返回空陣列
+            result = np.array([])
         
         return result
     
@@ -495,30 +541,29 @@ def extract_filtered_data(filtered_file, output_format='concatenate'):
 def get_channel_indices():
     """
     返回所需電極的索引
-    根據 SEED 資料集的 30 通道配置
+    根據 FACED 資料集的 32 通道配置
     
-    SEED 資料集 30 通道順序:
-    FP1, FPZ, FP2, AF3, AF4, F7, F5, F3, F1, FZ, F2, F4, F6, F8,
-    FT7, FC5, FC3, FC1, FCZ, FC2, FC4, FC6, FT8,
-    T7, C5, C3, C1, CZ, C2, C4, C6, T8,
-    TP7, CP5, CP3, CP1, CPZ, CP2, CP4, CP6, TP8,
-    P7, P5, P3, P1, PZ, P2, P4, P6, P8,
-    PO7, PO5, PO3, POZ, PO4, PO6, PO8, CB1, O1, OZ, O2, CB2
-    
-    但實際上 SEED 只有 62 個電極，我們的資料集使用 30 個通道
-    需要根據實際資料調整
+    FACED 資料集 32 通道順序:
+    1	Fp1	9	FC2	17	CP1	25	P8
+    2	Fp2	10	FC5	18	CP2	26	PO3
+    3	Fz	11	FC6	19	CP5	27	PO4
+    4	F3	12	Cz	20	CP6	28	Oz
+    5	F4	13	C3	21	Pz	29	O1
+    6	F7	14	C4	22	P3	30	O2
+    7	F8	15	T7	23	P4	31	 HEOR
+    8	FC1	16	T8	24	P7	32	 HEOL
     """
-    # SEED 資料集前面的電極通常包含 Fp1, Fp2, Fz
+    # FACED 資料集前面的電極通常包含 Fp1, Fp2, Fz
     # 根據標準 10-20 系統，這些是前額葉電極
     channel_map = {
         'Fp1': 0,   # FP1
-        'Fp2': 2,   # FP2  
-        'Fz': 9,    # FZ
+        'Fp2': 1,   # FP2  
+        'Fz': 2,    # FZ
     }
     return channel_map
 
 
-def generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, window_sec, fs, A, B):
+def generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, window_sec, overlap_ratio, fs, A, B):
     """
     生成詳細的過濾報告
     
@@ -526,6 +571,7 @@ def generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, 
         all_filtered_info: 所有受試者的過濾資訊列表
         output_dir: 輸出資料夾路徑
         其他參數: 過濾配置參數
+        overlap_ratio: 重疊比例
     """
     report_file = Path(output_dir) / 'AsI_Filter_Report.txt'
     json_file = Path(output_dir) / 'AsI_Filter_Report.json'
@@ -559,6 +605,7 @@ def generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, 
         f.write("-" * 100 + "\n")
         f.write(f"  影片長度: {session_sec} 秒\n")
         f.write(f"  窗口長度: {window_sec} 秒\n")
+        f.write(f"  重疊比例: {overlap_ratio}")
         f.write(f"  採樣頻率: {fs} Hz\n")
         f.write(f"  MDI 參數: A={A}, B={B}\n")
         f.write(f"  使用電極: Fp1, Fp2, Fz\n")
@@ -758,61 +805,54 @@ def generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, 
 
 
 def process_all_subjects(input_dir, output_dir, dataset='both', session_sec=30, 
-                        window_sec=1, fs=250, A=5, B=5):
+                        window_sec=1, overlap_ratio=0.5, fs=250, A=5, B=5,
+                        max_removed_ratio=0.5):
     """
-    處理所有受試者的資料
+    處理所有受試者的資料（支援重疊視窗）
     
     參數:
-        input_dir: 輸入資料夾路徑 (../Processed_data)
-        output_dir: 輸出資料夾路徑 (../Processed_data_after_AsI)
-        dataset: 資料集類型 ('both', 'first_batch', 'second_batch')
+        input_dir: 輸入資料夾路徑
+        output_dir: 輸出資料夾路徑
+        dataset: 資料集類型
         session_sec: 每個影片的長度（秒）
         window_sec: 窗口長度(秒)
+        overlap_ratio: 重疊比例 (0.0, 0.5, 0.75)
         fs: 採樣頻率
         A, B: MDI 參數
     """
-    # 獲取電極索引
     channel_indices = get_channel_indices()
-    
-    # 建立輸出資料夾
     os.makedirs(output_dir, exist_ok=True)
     
-    # 載入 video order（28 個影片）
     print("載入 video order...")
     vid_orders = video_order_load(dataset, 28)
     print(f"Video order 載入完成，形狀: {vid_orders.shape}")
     
-    # 收集所有過濾資訊
     all_filtered_info = []
-    
-    # 遍歷所有 subject 檔案
     subject_files = sorted(Path(input_dir).glob('sub*.pkl'))
     
     print(f"\n找到 {len(subject_files)} 個受試者資料檔案")
+    print(f"視窗設定: 長度={window_sec}s, 重疊率={overlap_ratio*100}%")
     print("=" * 80)
     
     for sub_idx, subject_file in enumerate(subject_files):
-        subject_name = subject_file.stem  # 例如: sub000
+        subject_name = subject_file.stem
         print(f"\n處理: {subject_name} (索引: {sub_idx})")
         
-        # 設定輸出檔案路徑
         output_file = Path(output_dir) / subject_file.name
         
-        # 載入受試者資料
         try:
             with open(subject_file, 'rb') as f:
                 subject_data = pickle.load(f)
             
             print(f"  資料形狀: {subject_data.shape}")
             
-            # 獲取該受試者的 video order
             if sub_idx < vid_orders.shape[0]:
                 video_order = vid_orders[sub_idx, :]
             else:
                 print(f"  警告: video order 中找不到索引 {sub_idx}，跳過")
                 continue
             
-            # 處理資料
+            # 使用重疊視窗處理資料
             filtered_info = process_subject_data(
                 subject_data,
                 video_order,
@@ -821,148 +861,70 @@ def process_all_subjects(input_dir, output_dir, dataset='both', session_sec=30,
                 channel_indices,
                 session_sec,
                 window_sec,
+                overlap_ratio,  # 新增參數
                 fs,
                 A,
-                B
+                B,
+                max_removed_ratio
             )
             all_filtered_info.append(filtered_info)
             
-            print(f"  總 trials: {filtered_info['total_trials']}")
-            print(f"  中性 trials: {filtered_info['neutral_trials']}")
-            print(f"  情緒 trials: {filtered_info['emotion_trials']}")
-            print(f"  移除窗口數: {len(filtered_info['removed_windows'])}")
-            print(f"  移除 trials 數: {len(filtered_info['removed_trials'])}")
-            
         except Exception as e:
-            print(f"  錯誤: 處理 {subject_name} 時發生錯誤: {e}")
+            print(f"  錯誤: {e}")
             import traceback
             traceback.print_exc()
             continue
     
-    # 印出總結報告
-    print("\n" + "=" * 80)
-    print("AsI 濾波總結報告")
-    print("=" * 80)
-    
-    total_removed_windows = sum(len(info['removed_windows']) for info in all_filtered_info)
-    total_removed_trials = sum(len(info['removed_trials']) for info in all_filtered_info)
-    total_neutral_trials = sum(info['neutral_trials'] for info in all_filtered_info)
-    
-    print(f"\n總共處理受試者數: {len(all_filtered_info)}")
-    print(f"總共中性 trials 數: {total_neutral_trials}")
-    print(f"總共移除窗口數: {total_removed_windows}")
-    print(f"總共移除 trials 數: {total_removed_trials}")
-    
-    print("\n詳細移除資訊:")
-    print("-" * 80)
-    for info in all_filtered_info:
-        if len(info['removed_trials']) > 0 or len(info['removed_windows']) > 0:
-            print(f"\nSubject {info['subject_idx']}:")
-            if info['removed_trials']:
-                print("  移除的 Trials:")
-                for trial_info in info['removed_trials']:
-                    print(f"    - {trial_info}")
-            if info['removed_windows']:
-                print(f"  移除的窗口 (顯示前10個，共{len(info['removed_windows'])}個):")
-                for window_info in info['removed_windows'][:10]:
-                    print(f"    - {window_info}")
-                if len(info['removed_windows']) > 10:
-                    print(f"    ... 還有 {len(info['removed_windows']) - 10} 個窗口")
-    
-    print("\n" + "=" * 80)
-    print(f"處理完成！過濾後的資料已儲存至: {output_dir}")
-    print("=" * 80)
-    
-    # 生成詳細報告
+    # 生成報告
     print("\n正在生成詳細報告...")
-    generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, window_sec, fs, A, B)
+    generate_filter_report(all_filtered_info, output_dir, dataset, session_sec, 
+                          window_sec, fs, A, B, overlap_ratio)
     
     return all_filtered_info
 
 
 def main():
-    """
-    主函數
-    """
+    """主函數"""
     parser = argparse.ArgumentParser(
-        description='AsI (Asymmetry Index) 濾波器 - 用於EEG情緒識別的訊號篩選'
+        description='AsI 濾波器 - 支援重疊視窗'
     )
-    parser.add_argument(
-        '--input_dir',
-        type=str,
-        default='../Processed_data',
-        help='輸入資料夾路徑'
-    )
-    parser.add_argument(
-        '--output_dir',
-        type=str,
-        default='../Processed_data_after_AsI',
-        help='輸出資料夾路徑'
-    )
-    parser.add_argument(
-        '--dataset',
-        type=str,
-        default='both',
-        choices=['both', 'first_batch', 'second_batch'],
-        help='資料集類型'
-    )
-    parser.add_argument(
-        '--session_sec',
-        type=int,
-        default=30,
-        help='每個影片的長度（秒）'
-    )
-    parser.add_argument(
-        '--window_sec',
-        type=int,
-        default=1,
-        help='窗口長度(秒)'
-    )
-    parser.add_argument(
-        '--fs',
-        type=int,
-        default=250,
-        help='採樣頻率 (Hz)'
-    )
-    parser.add_argument(
-        '--A',
-        type=int,
-        default=5,
-        help='MDI 參數 A (歷史時間點數量)'
-    )
-    parser.add_argument(
-        '--B',
-        type=int,
-        default=5,
-        help='MDI 參數 B (未來時間點偏移量)'
-    )
+    parser.add_argument('--input-dir', type=str, default='../Processed_Data')
+    parser.add_argument('--output-dir', type=str, default='../Processed_Data_after_AsI')
+    parser.add_argument('--dataset', type=str, default='both', 
+                       choices=['both', 'first_batch', 'second_batch'])
+    parser.add_argument('--session-sec', type=int, default=30)
+    parser.add_argument('--window-sec', type=int, default=1,
+                       help='視窗長度（秒）')
+    parser.add_argument('--overlap-ratio', type=float, default=0.5,
+                       choices=[0.0, 0.25, 0.5, 0.75],
+                       help='視窗重疊比例: 0.0(無重疊), 0.5(50%%), 0.75(75%%)')
+    parser.add_argument('--fs', type=int, default=250)
+    parser.add_argument('--A', type=int, default=5)
+    parser.add_argument('--B', type=int, default=5)
+    parser.add_argument('--max-removed-ratio', type=float, default=0.5,
+                       help='觸發移除整個 trial 的最大移除窗口比例（對應原始 15/30）')
     
     args = parser.parse_args()
     
     print("=" * 80)
-    print("AsI (Asymmetry Index) 濾波器")
+    print("AsI 濾波器 (支援重疊視窗)")
     print("=" * 80)
-    print(f"輸入資料夾: {args.input_dir}")
-    print(f"輸出資料夾: {args.output_dir}")
-    print(f"資料集: {args.dataset}")
-    print(f"影片長度: {args.session_sec} 秒")
-    print(f"窗口長度: {args.window_sec} 秒")
-    print(f"採樣頻率: {args.fs} Hz")
-    print(f"MDI 參數: A={args.A}, B={args.B}")
-    print(f"使用電極: Fp1, Fp2, Fz")
-    print(f"Baseline: 中性影片 (Video 13-16)")
+    print(f"視窗長度: {args.window_sec} 秒")
+    print(f"重疊比例: {args.overlap_ratio * 100}%")
+    print(f"步長: {args.window_sec * (1 - args.overlap_ratio)} 秒")
     print("=" * 80)
     
-    # 執行處理
     process_all_subjects(
         args.input_dir,
         args.output_dir,
         args.dataset,
         args.session_sec,
         args.window_sec,
+        args.overlap_ratio,  # 新增
         args.fs,
         args.A,
-        args.B
+        args.B,
+        args.max_removed_ratio  # 新增
     )
 
 
@@ -1029,4 +991,3 @@ with open('../Processed_data_after_AsI/sub000.pkl', 'rb') as f:
 #     }
 # }
 """
-   
