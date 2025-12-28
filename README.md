@@ -10,7 +10,7 @@ End-to-end pipelines for EEG-based emotion recognition. The repository contains 
    .venv\\Scripts\\activate
    pip install -r requirements.txt
    ```
-2. **Place processed EEG pickles** under `Processed_data/` (path referenced by the feature scripts). Adjust script arguments if your data lives elsewhere.
+2. **Place processed EEG pickles** under `Processed_data/` (path referenced by the feature scripts). Adjust script arguments if your data lives elsewhere. Dataset download: [FACED EEG Repository](https://www.synapse.org/Synapse:syn50614194/files/).
 3. **Extract features** (DE / PSD / Hjorth, or wavelet-specific features) using the scripts inside `Features/` or `Wavelet/`.
 4. **Run a pipeline** (e.g., `Binary-Classification-Fourier/00_Cross_Subject-Linear_kernel/run_all.py`) to perform normalization, smoothing, SVM training/testing, and plotting.
 5. **Validate results** with the statistical tools in `Statistics/` when comparing multiple experiment settings.
@@ -48,7 +48,7 @@ End-to-end pipelines for EEG-based emotion recognition. The repository contains 
    .venv\\Scripts\\activate
    pip install -r requirements.txt
    ```
-2. **放置處理後的 EEG pickle** 於 `Processed_data/` (如路徑不同，需在腳本中調整)。
+2. **放置處理後的 EEG pickle** 於 `Processed_data/` (如路徑不同，需在腳本中調整)。 資料集下載: [FACED EEG Repository](https://www.synapse.org/Synapse:syn50614194/files/)
 3. **執行特徵擷取**：使用 `Features/` (傅立葉) 或 `Wavelet/` (小波) 內的腳本產生 `.mat` 特徵檔。
 4. **跑分類流程**：例如 `Binary-Classification-Fourier/00_Cross_Subject-Linear_kernel/run_all.py`，可自動完成正規化、LDS 平滑、SVM 訓練/測試與繪圖。
 5. **結果驗證**：若需比較多個設定，使用 `Statistics/` 進行 ANOVA、Friedman、Wilcoxon 等統計檢定。
